@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,7 +13,10 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const ARTIFACTS_DIR = path.resolve(import.meta.dirname, "../../artifacts-mcp-test");
 
 process.env.QA_ARTIFACTS_DIR = ARTIFACTS_DIR;
-process.env.PLAYWRIGHT_CHROMIUM_PATH ||= "/opt/pw-browsers/chromium";
+// Sandboxed CI images ship Chromium here; elsewhere fall back to the one `playwright install` downloaded.
+if (!process.env.PLAYWRIGHT_CHROMIUM_PATH && existsSync("/opt/pw-browsers/chromium")) {
+  process.env.PLAYWRIGHT_CHROMIUM_PATH = "/opt/pw-browsers/chromium";
+}
 
 let demoServer: ReturnType<typeof import("node:http").createServer>;
 let client: Client;

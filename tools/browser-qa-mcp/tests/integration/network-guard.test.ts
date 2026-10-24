@@ -1,10 +1,14 @@
+import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BrowserManager } from "../../src/runner/browser-manager.js";
 import { TargetPolicy } from "../../src/security/target-policy.js";
 
-process.env.PLAYWRIGHT_CHROMIUM_PATH ||= "/opt/pw-browsers/chromium";
+// Sandboxed CI images ship Chromium here; elsewhere fall back to the one `playwright install` downloaded.
+if (!process.env.PLAYWRIGHT_CHROMIUM_PATH && existsSync("/opt/pw-browsers/chromium")) {
+  process.env.PLAYWRIGHT_CHROMIUM_PATH = "/opt/pw-browsers/chromium";
+}
 
 // Stands in for an internal service: anything that reaches it is an SSRF.
 let internal: Server;
