@@ -2,11 +2,12 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { safeValidateTestPlan } from "./planner/schema.js";
 import { runTestPlan } from "./runner/test-runner.js";
+import { renderHtmlReport } from "./reports/html-reporter.js";
 
 async function main(): Promise<void> {
   const [planPath, ...rest] = process.argv.slice(2);
   if (!planPath) {
-    console.error("Usage: run:plan <path-to-test-plan.json> [--allow-local-dev] [--out <report.json>]");
+    console.error("Usage: run:plan <path-to-test-plan.json> [--allow-local-dev] [--out <report.json>] [--html <report.html>]");
     process.exitCode = 1;
     return;
   }
@@ -14,6 +15,8 @@ async function main(): Promise<void> {
   const allowLocalDev = rest.includes("--allow-local-dev");
   const outIndex = rest.indexOf("--out");
   const outPath = outIndex >= 0 ? rest[outIndex + 1] : undefined;
+  const htmlIndex = rest.indexOf("--html");
+  const htmlPath = htmlIndex >= 0 ? rest[htmlIndex + 1] : undefined;
 
   const raw = JSON.parse(readFileSync(planPath, "utf-8"));
   const validation = safeValidateTestPlan(raw);
@@ -35,6 +38,11 @@ async function main(): Promise<void> {
     console.log(`Report written to ${outPath}`);
   } else {
     console.log(json);
+  }
+
+  if (htmlPath) {
+    writeFileSync(htmlPath, renderHtmlReport(result));
+    console.log(`HTML report written to ${htmlPath}`);
   }
 
   console.error(`\nRun status: ${result.status} (runId: ${result.runId})`);

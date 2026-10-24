@@ -22,10 +22,11 @@
 - **An optional AI test planner** (`src/planner/llm-planner.ts`): converts a natural-language request into a test plan via an LLM, then validates it through the exact same schema a hand-written plan goes through. A plan that uses an unsupported action, or whose `baseUrl` the model tried to change, is rejected rather than silently run. **Two providers are supported — Anthropic and Gemini** — selected via environment variables, with no hard dependency on either (see [AI Planner: Model & Pricing Choice](#ai-planner-model--pricing-choice)).
 - **Optional evidence-based failure diagnosis** (`src/diagnosis/failure-analyzer.ts`): with no API key configured, returns only the factual evidence (no causal claim). With one configured, attaches a model-generated hypothesis explicitly flagged `isModelGenerated: true` — never conflated with a verified result.
 - A demo signup application (`fixtures/demo-app/`) with one deliberately introduced bug, and an example test plan (`examples/signup-flow.json`) that reliably catches it — exercised through both the CLI and the MCP server.
+- **A self-contained HTML report viewer** (`src/reports/html-reporter.ts`): color-coded PASS/FAIL/BLOCKED status per test, the full step-by-step timeline, console/network evidence, and embedded (base64 inline, no broken links) screenshots in one file you can open, email, or attach anywhere. Every piece of text that didn't originate in this codebase — console messages, network URLs, assertion errors, test-plan selectors — is HTML-escaped before being written, with dedicated tests proving a malicious `<script>` in any of those fields can't execute when the report is opened. Generate it with `--html report.html` on a run, or convert an existing `report.json` with `npm run report:html`.
 
 ### Not yet implemented (see [Known Limitations](#known-limitations) and [Future Improvements](#future-improvements))
 
-A JSON→HTML report viewer, and DNS-rebinding/redirect revalidation for the target policy. These are tracked as the next milestones, not claimed as working today.
+DNS-rebinding/redirect revalidation for the target policy. Tracked as the next milestone, not claimed as working today.
 
 ---
 
@@ -174,10 +175,12 @@ npm run demo:app
 
 **2. Run the example test plan against it** (in another terminal):
 ```bash
-npm run run:plan -- examples/signup-flow.json --allow-local-dev
+npm run run:plan -- examples/signup-flow.json --allow-local-dev --html report.html
 ```
 
-`--allow-local-dev` is required because `127.0.0.1` is a loopback address and the target policy blocks loopback/private targets by default (see [Security & Privacy Considerations](#security--privacy-considerations)). Add `--out report.json` to write the JSON report to a file instead of stdout.
+`--allow-local-dev` is required because `127.0.0.1` is a loopback address and the target policy blocks loopback/private targets by default (see [Security & Privacy Considerations](#security--privacy-considerations)). Add `--out report.json` to write the JSON report to a file instead of stdout, and/or `--html report.html` to also render the self-contained HTML viewer — open it in a browser to see color-coded PASS/FAIL/BLOCKED results, the step timeline, and embedded screenshots for any failure.
+
+Already have a `report.json` (e.g. saved from the MCP server's `get_run_report` output) and just want the HTML view? `npm run report:html -- report.json [out.html]` converts it without re-running anything.
 
 ---
 
@@ -262,7 +265,7 @@ npm test          # unit + integration tests (includes a real browser run and a 
 npm run build      # TypeScript type-check / compile
 ```
 
-`npm test` runs 76 tests across 10 files: schema validation, assertion semantics, the target policy (including IPv4/IPv6 edge cases), sanitization, failure-evidence extraction, the provider-selection logic in `src/llm/client.ts`, the LLM planner/diagnosis modules (with an injected fake provider — no network calls), `RunStore`, and `tests/integration/mcp-server.test.ts`, which spins up the real demo app, launches a real Chromium via Playwright, and drives all five MCP tools through a real `Client`/`McpServer` pair. All 76 passed as of this writing (`PLAYWRIGHT_CHROMIUM_PATH` set to a pre-installed Chromium in this repo's development container).
+`npm test` runs 87 tests across 11 files: schema validation, assertion semantics, the target policy (including IPv4/IPv6 edge cases), sanitization, failure-evidence extraction, the provider-selection logic in `src/llm/client.ts`, the LLM planner/diagnosis modules (with an injected fake provider — no network calls), `RunStore`, the HTML reporter (including dedicated XSS-escaping tests for malicious console/network/selector/error text), and `tests/integration/mcp-server.test.ts`, which spins up the real demo app, launches a real Chromium via Playwright, and drives all five MCP tools through a real `Client`/`McpServer` pair. All 87 passed as of this writing (`PLAYWRIGHT_CHROMIUM_PATH` set to a pre-installed Chromium in this repo's development container).
 
 Manual end-to-end verification (also actually run, against the CLI, with `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`LLM_PROVIDER` unset to confirm the zero-API-key path — see [Do I Need an API Key?](#do-i-need-an-api-key)):
 ```bash
@@ -314,7 +317,6 @@ A test plan is a JSON document validated against a strict Zod schema (`src/plann
 
 - **Target policy checks the literal hostname/IP in the URL only.** It covers IPv4 and IPv6 loopback/private/link-local/unique-local ranges (including bracketed and IPv4-mapped IPv6 forms — see `tests/unit/target-policy.test.ts`), but it does not resolve DNS or revalidate redirect destinations, so it does not yet defend against DNS rebinding or a redirect chain that lands on a disallowed address after the initial check. Treat it as a first line of defense, not a complete network boundary.
 - **Screenshots and trace files are not themselves redacted.** Text-based evidence (console messages, captured URLs) is sanitized (see below), but a screenshot or a Playwright trace can still visually contain whatever was on screen. Don't point this at a page that renders real secrets.
-- **No HTML report viewer yet.** Reports are JSON only; render/inspect them with your own tooling for now.
 - **No retention policy for runs or artifacts.** `RunStore`'s in-memory cache and the `artifacts/<runId>/` directories on disk both grow unbounded for the lifetime of an MCP server process or a CLI-driven CI job — nothing evicts old runs or deletes old screenshots/traces. Fine for a dev loop or a bounded CI run; something a long-lived deployment would need to add.
 - **The AI planner/diagnosis prompts are not adversarially hardened.** Output is always schema-validated and the planner's `baseUrl` is pinned (see below), so a malicious plan can't execute — but a sufficiently adversarial natural-language request has not been fuzz-tested against the planner.
 - Tested on Linux (this repository's development container, Node 22) with Chromium only; Firefox/WebKit and other platforms are untested.
@@ -337,7 +339,6 @@ A test plan is a JSON document validated against a strict Zod schema (`src/plann
 ## Future Improvements
 
 - [ ] DNS resolution + redirect-chain revalidation in the target policy
-- [ ] Lightweight HTML report viewer
 - [ ] Redaction for captured screenshots/traces (today only text-based evidence is sanitized)
 - [ ] Adversarial testing of the AI planner's prompt against deliberately tricky natural-language requests
 - [ ] Additional browser engines (Firefox/WebKit) and non-Linux platform verification

@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "demo:app": "node fixtures/demo-app/server.js",
     "run:plan": "tsx src/index.ts",
+    "report:html": "tsx src/report-to-html.ts",
     "mcp": "tsx src/mcp/index.ts"
   },
   "dependencies": {
