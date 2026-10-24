@@ -1,8 +1,11 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { NetworkGuard } from "../security/network-guard.js";
+import type { TargetPolicy } from "../security/target-policy.js";
 
 export interface TestSession {
   context: BrowserContext;
   page: Page;
+  networkGuard: NetworkGuard;
 }
 
 /**
@@ -21,13 +24,21 @@ export class BrowserManager {
     this.browser = await chromium.launch({ headless: true, executablePath });
   }
 
-  async openTestSession(): Promise<TestSession> {
+  async openTestSession(targetPolicy: TargetPolicy): Promise<TestSession> {
     if (!this.browser) {
       throw new Error("BrowserManager.launch() must be called before openTestSession()");
     }
-    const context = await this.browser.newContext();
+    // Service workers can issue requests that context.route() never sees.
+    const context = await this.browser.newContext({ serviceWorkers: "block" });
+    const networkGuard = new NetworkGuard(targetPolicy);
+    try {
+      await networkGuard.install(context);
+    } catch (err) {
+      await context.close().catch(() => {});
+      throw err;
+    }
     const page = await context.newPage();
-    return { context, page };
+    return { context, page, networkGuard };
   }
 
   async closeTestSession(session: TestSession): Promise<void> {

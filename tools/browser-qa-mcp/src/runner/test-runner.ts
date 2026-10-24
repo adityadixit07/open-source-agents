@@ -13,6 +13,7 @@ import { ArtifactManager } from "../evidence/artifact-manager.js";
 import { ConsoleCollector } from "../evidence/console-collector.js";
 import { NetworkCollector } from "../evidence/network-collector.js";
 import { writeReport } from "../reports/json-reporter.js";
+import { pruneArtifacts, type RetentionPolicy } from "../evidence/artifact-retention.js";
 import { BrowserManager, type TestSession } from "./browser-manager.js";
 import { ActionBlockedError, executeAction } from "./action-executor.js";
 import { AssertionFailedError, executeAssertion, isAssertionAction } from "../assertions/assertion-engine.js";
@@ -25,6 +26,8 @@ export interface RunPlanOptions {
   allowedOrigins?: string[];
   /** Directory runs are written under, one subdirectory per runId. Defaults to ./artifacts. */
   artifactsBaseDir?: string;
+  /** Old runs to delete after this one is written. Omit to keep everything. */
+  retention?: RetentionPolicy;
 }
 
 type TestCase = ValidatedTestPlan["tests"][number];
@@ -74,6 +77,9 @@ export async function runTestPlan(plan: ValidatedTestPlan, options: RunPlanOptio
   }
 
   writeReport(result, artifactManager.reportPath());
+  if (options.retention) {
+    pruneArtifacts(options.artifactsBaseDir ?? "./artifacts", options.retention, { keep: [runId] });
+  }
   return result;
 }
 
@@ -117,7 +123,7 @@ async function runSingleTest(
 
   let session: TestSession;
   try {
-    session = await browserManager.openTestSession();
+    session = await browserManager.openTestSession(targetPolicy);
   } catch (err) {
     const finishedAt = new Date().toISOString();
     return {
@@ -148,6 +154,7 @@ async function runSingleTest(
     for (const step of test.steps) {
       const stepStart = Date.now();
       try {
+        throwIfNavigationBlocked(session);
         if (isAssertionAction(step.action)) {
           const message = await executeAssertion(step, assertablePage, baseUrl);
           steps.push({ action: step.action, selector: step.selector, status: "ok", message, durationMs: Date.now() - stepStart });
@@ -168,8 +175,11 @@ async function runSingleTest(
             durationMs: Date.now() - stepStart,
           });
         }
-      } catch (err) {
+      } catch (caught) {
         const durationMs = Date.now() - stepStart;
+        // A redirect or click into a blocked target shows up as a timeout or net error; report the policy reason instead.
+        const blocked = session.networkGuard.takeBlockedNavigation();
+        const err = blocked ? new ActionBlockedError(blocked.reason) : caught;
         if (err instanceof AssertionFailedError) {
           steps.push({ action: step.action, selector: step.selector, status: "failed", message: err.message, durationMs });
           status = "FAIL";
@@ -187,6 +197,13 @@ async function runSingleTest(
           error = (err as Error).message;
         }
         break;
+      }
+    }
+    if (status === "PASS") {
+      const blocked = session.networkGuard.takeBlockedNavigation();
+      if (blocked) {
+        status = "BLOCKED";
+        error = blocked.reason;
       }
     }
   } finally {
@@ -225,6 +242,11 @@ async function runSingleTest(
     networkFailures,
     tracePath,
   };
+}
+
+function throwIfNavigationBlocked(session: TestSession): void {
+  const blocked = session.networkGuard.takeBlockedNavigation();
+  if (blocked) throw new ActionBlockedError(blocked.reason);
 }
 
 async function captureFailureScreenshot(

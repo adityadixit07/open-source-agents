@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { safeValidateTestPlan } from "../planner/schema.js";
 import { runTestPlan } from "../runner/test-runner.js";
-import { RunStore } from "../runner/run-store.js";
+import { RunStore, isValidRunId } from "../runner/run-store.js";
+import { retentionFromEnv } from "../evidence/artifact-retention.js";
 import { TargetPolicy } from "../security/target-policy.js";
 import { inspectPage } from "../runner/inspect-page.js";
 import { extractFailureEvidence } from "../evidence/failure-evidence.js";
@@ -50,7 +51,7 @@ export function createServer(): McpServer {
       if (!validation.success) {
         return jsonContent({ error: "invalid_test_plan", issues: validation.error.format() }, true);
       }
-      const result = await runTestPlan(validation.data, { allowLocalDev, allowedOrigins, artifactsBaseDir: ARTIFACTS_BASE_DIR });
+      const result = await runTestPlan(validation.data, { allowLocalDev, allowedOrigins, artifactsBaseDir: ARTIFACTS_BASE_DIR, retention: retentionFromEnv() });
       runStore.save(result);
       return jsonContent(result);
     },
@@ -89,6 +90,9 @@ export function createServer(): McpServer {
       },
     },
     async ({ runId }) => {
+      if (!isValidRunId(runId)) {
+        return jsonContent({ error: `Invalid runId "${runId}": expected a UUID returned by run_qa_test` }, true);
+      }
       const result = runStore.get(runId);
       if (!result) {
         return jsonContent({ error: `No run found for runId "${runId}"` }, true);
@@ -113,6 +117,9 @@ export function createServer(): McpServer {
       },
     },
     async ({ runId, testId, diagnose }) => {
+      if (!isValidRunId(runId)) {
+        return jsonContent({ error: `Invalid runId "${runId}": expected a UUID returned by run_qa_test` }, true);
+      }
       const result = runStore.get(runId);
       if (!result) {
         return jsonContent({ error: `No run found for runId "${runId}"` }, true);

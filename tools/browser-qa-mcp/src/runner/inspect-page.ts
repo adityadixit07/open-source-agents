@@ -24,7 +24,7 @@ const NAVIGATION_TIMEOUT_MS = 10_000;
  * arbitrary script.
  */
 export async function inspectPage(targetUrl: string, targetPolicy: TargetPolicy): Promise<PageInspection> {
-  const verdict = targetPolicy.evaluate(targetUrl);
+  const verdict = await targetPolicy.evaluateResolved(targetUrl);
   if (!verdict.allowed) {
     throw new Error(verdict.reason ?? `Target "${targetUrl}" is not allowed`);
   }
@@ -32,9 +32,15 @@ export async function inspectPage(targetUrl: string, targetPolicy: TargetPolicy)
   const browserManager = new BrowserManager();
   await browserManager.launch();
   try {
-    const session = await browserManager.openTestSession();
+    const session = await browserManager.openTestSession(targetPolicy);
     try {
-      await session.page.goto(targetUrl, { timeout: NAVIGATION_TIMEOUT_MS });
+      try {
+        await session.page.goto(targetUrl, { timeout: NAVIGATION_TIMEOUT_MS });
+      } finally {
+        // A redirect the network guard aborted surfaces as a generic net error; report the policy reason instead.
+        const blocked = session.networkGuard.takeBlockedNavigation();
+        if (blocked) throw new Error(blocked.reason);
+      }
       const title = await session.page.title();
       const url = session.page.url();
 

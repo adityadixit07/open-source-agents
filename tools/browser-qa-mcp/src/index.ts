@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { safeValidateTestPlan } from "./planner/schema.js";
 import { runTestPlan } from "./runner/test-runner.js";
 import { renderHtmlReport } from "./reports/html-reporter.js";
+import { retentionFromEnv } from "./evidence/artifact-retention.js";
 
 async function main(): Promise<void> {
   const [planPath, ...rest] = process.argv.slice(2);
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   const result = await runTestPlan(validation.data, {
     allowLocalDev,
     artifactsBaseDir: process.env.QA_ARTIFACTS_DIR || "./artifacts",
+    retention: retentionFromEnv(),
   });
   const json = JSON.stringify(result, null, 2);
 

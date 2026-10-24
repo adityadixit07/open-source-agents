@@ -29,7 +29,7 @@ export async function executeAction(step: TestStep, ctx: ActionContext): Promise
   switch (step.action) {
     case "navigate": {
       const target = new URL(step.url!, ctx.baseUrl).toString();
-      const verdict = ctx.targetPolicy.evaluate(target);
+      const verdict = await ctx.targetPolicy.evaluateResolved(target);
       if (!verdict.allowed) {
         throw new ActionBlockedError(verdict.reason ?? `Navigation to "${target}" is not allowed`);
       }

@@ -67,4 +67,48 @@ describe("TargetPolicy", () => {
     const policy = new TargetPolicy({});
     expect(policy.evaluate("http://[2001:4860:4860::8888]/").allowed).toBe(true);
   });
+
+  it("blocks a public-looking hostname that resolves to a private address", async () => {
+    const policy = new TargetPolicy({ resolveHost: async () => ["93.184.216.34", "10.0.0.5"] });
+    const verdict = await policy.evaluateResolved("https://internal.example.com/");
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toMatch(/10\.0\.0\.5/);
+  });
+
+  it("allows a hostname whose every address is public", async () => {
+    const policy = new TargetPolicy({ resolveHost: async () => ["93.184.216.34"] });
+    expect((await policy.evaluateResolved("https://example.com/")).allowed).toBe(true);
+  });
+
+  it("fails closed when DNS resolution fails", async () => {
+    const policy = new TargetPolicy({
+      resolveHost: async () => {
+        throw new Error("ENOTFOUND");
+      },
+    });
+    expect((await policy.evaluateResolved("https://nope.invalid/")).allowed).toBe(false);
+  });
+
+  it("skips DNS entirely with allowLocalDev", async () => {
+    const policy = new TargetPolicy({
+      allowLocalDev: true,
+      resolveHost: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    expect((await policy.evaluateResolved("http://localhost:4000/")).allowed).toBe(true);
+  });
+
+  it("applies allowedOrigins only when enforceOrigins is set", () => {
+    const policy = new TargetPolicy({ allowedOrigins: ["https://app.example.com"] });
+    expect(policy.evaluate("https://cdn.example.net/a.js", { enforceOrigins: false }).allowed).toBe(true);
+    expect(policy.evaluate("https://cdn.example.net/a.js").allowed).toBe(false);
+  });
+
+  it("blocks 0.0.0.0, CGNAT and multicast ranges", () => {
+    const policy = new TargetPolicy({});
+    for (const url of ["http://0.0.0.0/", "http://100.64.0.1/", "http://224.0.0.1/", "http://app.localhost/"]) {
+      expect(policy.evaluate(url).allowed).toBe(false);
+    }
+  });
 });
