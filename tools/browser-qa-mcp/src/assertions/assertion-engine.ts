@@ -44,7 +44,7 @@ export async function executeAssertion(step: TestStep, page: AssertablePage, bas
     case "assert_text": {
       const expected = String(step.expected ?? "");
       const actual = await page.waitForTextContains(step.selector!, expected, timeout);
-      if (!actual || !actual.includes(expected)) {
+      if (actual === null || !actual.includes(expected)) {
         throw new AssertionFailedError(
           `Expected "${step.selector}" text to contain "${expected}", but got "${actual ?? "(element not found)"}"`,
         );

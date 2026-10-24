@@ -83,6 +83,20 @@ describe("assertion engine", () => {
     ).rejects.toThrow(AssertionFailedError);
   });
 
+  it("passes assert_text when expecting empty string and the element's text is legitimately empty", async () => {
+    const page = new FakePage({ text: { "#status": "" } });
+    await expect(
+      executeAssertion(step({ action: "assert_text", selector: "#status", expected: "" }), page, "http://x"),
+    ).resolves.toBeDefined();
+  });
+
+  it("fails assert_text when the element is not found (distinct from a legitimately empty text)", async () => {
+    const page = new FakePage({ text: {} });
+    await expect(
+      executeAssertion(step({ action: "assert_text", selector: "#missing", expected: "" }), page, "http://x"),
+    ).rejects.toThrow(AssertionFailedError);
+  });
+
   it("passes assert_url when the resolved URL matches", async () => {
     const page = new FakePage({ url: "http://127.0.0.1:4000/signup" });
     await expect(

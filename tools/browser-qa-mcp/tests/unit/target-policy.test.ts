@@ -37,4 +37,34 @@ describe("TargetPolicy", () => {
     const policy = new TargetPolicy({});
     expect(policy.evaluate("https://example.com/signup").allowed).toBe(true);
   });
+
+  it("blocks the bracketed IPv6 loopback address by default", () => {
+    const policy = new TargetPolicy({});
+    expect(policy.evaluate("http://[::1]:4000/signup").allowed).toBe(false);
+  });
+
+  it("allows the bracketed IPv6 loopback address with allowLocalDev", () => {
+    const policy = new TargetPolicy({ allowLocalDev: true });
+    expect(policy.evaluate("http://[::1]:4000/signup").allowed).toBe(true);
+  });
+
+  it("blocks an IPv6 link-local address by default", () => {
+    const policy = new TargetPolicy({});
+    expect(policy.evaluate("http://[fe80::1]/").allowed).toBe(false);
+  });
+
+  it("blocks an IPv6 unique-local address by default", () => {
+    const policy = new TargetPolicy({});
+    expect(policy.evaluate("http://[fd12:3456:789a::1]/").allowed).toBe(false);
+  });
+
+  it("blocks an IPv4-mapped IPv6 loopback address by default", () => {
+    const policy = new TargetPolicy({});
+    expect(policy.evaluate("http://[::ffff:127.0.0.1]/").allowed).toBe(false);
+  });
+
+  it("allows a public IPv6 address with no local-dev opt-in needed", () => {
+    const policy = new TargetPolicy({});
+    expect(policy.evaluate("http://[2001:4860:4860::8888]/").allowed).toBe(true);
+  });
 });

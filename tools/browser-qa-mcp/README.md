@@ -19,7 +19,7 @@
 - A target policy that blocks navigation to loopback/private-network/link-local addresses (including the `169.254.169.254` cloud metadata address) unless explicitly opted into, and can restrict to an allow-list of origins.
 - **Evidence collection**: console errors/warnings, failed/error-status network requests, a screenshot on every assertion failure, and a Playwright trace (`.zip`) for every failed or blocked test — all sanitized (secrets redacted from URLs/text) before being written to `artifacts/<runId>/`.
 - **A working MCP server** (`src/mcp/`) exposing five tools — `run_qa_test`, `inspect_page`, `get_run_report`, `get_failure_evidence`, `plan_qa_test` — built on the same runner/assertion/security services the CLI uses, with no separate "MCP version" of the browser logic. Verified with a real MCP client/server round trip in `tests/integration/mcp-server.test.ts` (not just type-checked).
-- **An optional AI test planner** (`src/planner/llm-planner.ts`): converts a natural-language request into a test plan via an LLM, then validates it through the exact same schema a hand-written plan goes through. A plan that uses an unsupported action, or whose `baseUrl` the model tried to change, is rejected rather than silently run.
+- **An optional AI test planner** (`src/planner/llm-planner.ts`): converts a natural-language request into a test plan via an LLM, then validates it through the exact same schema a hand-written plan goes through. A plan that uses an unsupported action, or whose `baseUrl` the model tried to change, is rejected rather than silently run. **Two providers are supported — Anthropic and Gemini** — selected via environment variables, with no hard dependency on either (see [AI Planner: Model & Pricing Choice](#ai-planner-model--pricing-choice)).
 - **Optional evidence-based failure diagnosis** (`src/diagnosis/failure-analyzer.ts`): with no API key configured, returns only the factual evidence (no causal claim). With one configured, attaches a model-generated hypothesis explicitly flagged `isModelGenerated: true` — never conflated with a verified result.
 - A demo signup application (`fixtures/demo-app/`) with one deliberately introduced bug, and an example test plan (`examples/signup-flow.json`) that reliably catches it — exercised through both the CLI and the MCP server.
 
@@ -33,8 +33,8 @@ A JSON→HTML report viewer, and DNS-rebinding/redirect revalidation for the tar
 
 - **Language & Runtime**: TypeScript 5 / Node.js 20+
 - **Core Library**: [Playwright](https://playwright.dev/) for browser automation, [Zod](https://zod.dev/) for schema validation, [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) for the MCP server
-- **Models**: None required for deterministic execution or the MCP server's core tools. `plan_qa_test` and diagnosis (`diagnose: true` on `get_failure_evidence`) are optional and call the Anthropic Messages API directly via `fetch` (no SDK dependency) when `ANTHROPIC_API_KEY` is set — see [Core Architecture Decisions](#core-architecture-decisions).
-- **External APIs / Tools**: Anthropic's API, only for the two optional AI features above. The demo app (`fixtures/demo-app/server.js`) uses only Node's built-in `http` module.
+- **Models**: None required for deterministic execution or the MCP server's core tools. `plan_qa_test` and diagnosis (`diagnose: true` on `get_failure_evidence`) are optional and call either the Anthropic Messages API or the Gemini API directly via `fetch` (no provider SDK dependency) — see [AI Planner: Model & Pricing Choice](#ai-planner-model--pricing-choice).
+- **External APIs / Tools**: Anthropic's or Google's API, only for the two optional AI features above, and only one of the two per deployment. The demo app (`fixtures/demo-app/server.js`) uses only Node's built-in `http` module.
 
 ---
 
@@ -81,6 +81,7 @@ A step is routed to the action executor (performs a browser operation) or the as
 - **Assertions are decoupled from Playwright.** `src/assertions/assertion-engine.ts` only depends on a minimal `AssertablePage` interface, implemented against a real browser by `PlaywrightAssertablePage` (`src/runner/playwright-page-adapter.ts`). This means assertion pass/fail logic is unit-tested (`tests/unit/assertion-engine.test.ts`) with an in-memory fake — no browser, no flakiness, sub-second test runs.
 - **Deterministic execution has no LLM dependency.** Nothing in `src/runner`, `src/assertions`, or `src/security` imports a model client. The optional AI planner (`src/planner/llm-planner.ts`) sits strictly in front of this engine, emitting the same validated JSON schema a human would write by hand — it can never bypass validation or the target policy.
 - **Three result statuses, not two.** `BLOCKED` is distinct from `FAIL` so a browser crash, a launch failure, or a target-policy rejection is never misreported as "the application is broken."
+- **One browser process per run, one context per test.** `BrowserManager` launches Chromium once in `runTestPlan` and hands out a fresh `BrowserContext` per test via `openTestSession()`/`closeTestSession()` — isolation comes from the context (separate cookies/storage/state), not from relaunching the whole browser process for every test in a plan.
 
 ---
 
@@ -124,10 +125,26 @@ A step is routed to the action executor (performs a browser operation) or the as
 | `PLAYWRIGHT_CHROMIUM_PATH` | No | *(Playwright's own managed browser)* | Absolute path to a pre-installed Chromium binary, for environments where `npx playwright install` cannot reach the network. |
 | `PORT` | No | `4000` | Port the demo app (`fixtures/demo-app/server.js`) listens on. |
 | `QA_ARTIFACTS_DIR` | No | `./artifacts` | Base directory runs are written under (one subdirectory per `runId`). The CLI and MCP server must point at the same directory to share run reports via `get_run_report`/`get_failure_evidence`. |
-| `ANTHROPIC_API_KEY` | No | *(unset)* | Enables `plan_qa_test` and `diagnose: true` on `get_failure_evidence`. Everything else works with this unset. |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-5-5` | Model used for the optional planner/diagnosis calls. |
+| `ANTHROPIC_API_KEY` | No | *(unset)* | Enables the AI planner/diagnosis via Anthropic. |
+| `ANTHROPIC_MODEL` | No | `claude-haiku-5-5` | Anthropic model for planner/diagnosis calls. |
+| `GEMINI_API_KEY` | No | *(unset)* | Enables the AI planner/diagnosis via Gemini. |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Gemini model for planner/diagnosis calls. |
+| `LLM_PROVIDER` | No | *(unset)* | `"anthropic"` or `"gemini"`. Required only if **both** API keys above are set, to disambiguate which one is used — see below. |
 
 The deterministic test runner itself takes no environment-variable configuration; target restrictions (`--allow-local-dev`/`allowLocalDev`, an allowed-origin list) are passed as CLI flags / tool arguments instead, so a test run's security posture is explicit at the call site rather than hidden in `.env`.
+
+### AI Planner: Model & Pricing Choice
+
+Both `plan_qa_test` and `get_failure_evidence`'s `diagnose: true` do one thing: turn a short natural-language request or a small evidence bundle into a few hundred to low-thousands of tokens of structured JSON output. That is squarely a "classification/extraction/short-generation" workload, not one that benefits from a frontier-tier reasoning model — so both supported providers default to their **cheapest, fastest tier**, not their flagship:
+
+| Provider | Default model | Input $/1M tokens | Output $/1M tokens |
+| :--- | :--- | :--- | :--- |
+| Anthropic | `claude-haiku-5-5` | $0.10 | $0.50 |
+| Gemini | `gemini-2.5-flash-lite` | $0.10 | $0.40 |
+
+Anthropic pricing is from Anthropic's own current rate card (first-party API). Gemini pricing is **not** confirmed from `ai.google.dev` directly — that domain wasn't reachable from this project's development sandbox — so it's cross-checked against several independent third-party trackers that all agree on $0.10/$0.40 for `gemini-2.5-flash-lite` as of October 2026 ([morphllm.com](https://www.morphllm.com/gemini-api-pricing), [llm-stats.com](https://llm-stats.com/models/gemini-2.5-flash), [pricepertoken.com](https://pricepertoken.com/pricing-page/model/google-gemini-2.5-flash)). **Verify current Gemini pricing at [ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing) before relying on it for budgeting.**
+
+At this size and volume, the two cheapest tiers are close enough (±20% on output, identical on input) that the real decision driver is usually **which provider you already have a key for**, not the per-token rate. That's why the provider is a runtime choice, not a hardcoded one: set whichever key you have, and both AI-assisted MCP tools work. For a materially more capable (and more expensive) planner on a harder natural-language request, override `ANTHROPIC_MODEL`/`GEMINI_MODEL` to a larger model — but for the planner/diagnosis workloads here, the cheap tier has been sufficient in this project's own testing (the fake-provider-injected unit tests in `tests/unit/llm-planner.test.ts` and `tests/unit/failure-analyzer.test.ts` exercise the logic independent of model choice).
 
 ---
 
@@ -172,7 +189,7 @@ It speaks MCP over stdio, so to use it from a client, point the client at the de
 }
 ```
 
-Set `ANTHROPIC_API_KEY` in `env` too if you want `plan_qa_test` and diagnosis enabled.
+Add `ANTHROPIC_API_KEY` (or `GEMINI_API_KEY`) to `env` if you want `plan_qa_test` and diagnosis enabled — see [AI Planner: Model & Pricing Choice](#ai-planner-model--pricing-choice) for picking between them.
 
 ### Tools
 
@@ -229,7 +246,7 @@ npm test          # unit + integration tests (includes a real browser run and a 
 npm run build      # TypeScript type-check / compile
 ```
 
-`npm test` runs 56 tests across 9 files: schema validation, assertion semantics, the target policy, sanitization, failure-evidence extraction, the LLM planner/diagnosis modules (with an injected fake provider — no network calls), `RunStore`, and `tests/integration/mcp-server.test.ts`, which spins up the real demo app, launches a real Chromium via Playwright, and drives all five MCP tools through a real `Client`/`McpServer` pair. All 56 passed as of this writing (`PLAYWRIGHT_CHROMIUM_PATH` set to a pre-installed Chromium in this repo's development container).
+`npm test` runs 76 tests across 10 files: schema validation, assertion semantics, the target policy (including IPv4/IPv6 edge cases), sanitization, failure-evidence extraction, the provider-selection logic in `src/llm/client.ts`, the LLM planner/diagnosis modules (with an injected fake provider — no network calls), `RunStore`, and `tests/integration/mcp-server.test.ts`, which spins up the real demo app, launches a real Chromium via Playwright, and drives all five MCP tools through a real `Client`/`McpServer` pair. All 76 passed as of this writing (`PLAYWRIGHT_CHROMIUM_PATH` set to a pre-installed Chromium in this repo's development container).
 
 Manual end-to-end verification (also actually run, against the CLI):
 ```bash
@@ -278,7 +295,7 @@ A test plan is a JSON document validated against a strict Zod schema (`src/plann
 
 ## Known Limitations
 
-- **Target policy checks the literal hostname/IP in the URL only.** It does not resolve DNS or revalidate redirect destinations, so it does not yet defend against DNS rebinding or a redirect chain that lands on a disallowed address after the initial check. Treat it as a first line of defense, not a complete network boundary.
+- **Target policy checks the literal hostname/IP in the URL only.** It covers IPv4 and IPv6 loopback/private/link-local/unique-local ranges (including bracketed and IPv4-mapped IPv6 forms — see `tests/unit/target-policy.test.ts`), but it does not resolve DNS or revalidate redirect destinations, so it does not yet defend against DNS rebinding or a redirect chain that lands on a disallowed address after the initial check. Treat it as a first line of defense, not a complete network boundary.
 - **Screenshots and trace files are not themselves redacted.** Text-based evidence (console messages, captured URLs) is sanitized (see below), but a screenshot or a Playwright trace can still visually contain whatever was on screen. Don't point this at a page that renders real secrets.
 - **No HTML report viewer yet.** Reports are JSON only; render/inspect them with your own tooling for now.
 - **The AI planner/diagnosis prompts are not adversarially hardened.** Output is always schema-validated and the planner's `baseUrl` is pinned (see below), so a malicious plan can't execute — but a sufficiently adversarial natural-language request has not been fuzz-tested against the planner.

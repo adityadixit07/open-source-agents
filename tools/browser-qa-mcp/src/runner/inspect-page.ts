@@ -30,33 +30,38 @@ export async function inspectPage(targetUrl: string, targetPolicy: TargetPolicy)
   }
 
   const browserManager = new BrowserManager();
-  const session = await browserManager.open();
+  await browserManager.launch();
   try {
-    await session.page.goto(targetUrl, { timeout: NAVIGATION_TIMEOUT_MS });
-    const title = await session.page.title();
-    const url = session.page.url();
+    const session = await browserManager.openTestSession();
+    try {
+      await session.page.goto(targetUrl, { timeout: NAVIGATION_TIMEOUT_MS });
+      const title = await session.page.title();
+      const url = session.page.url();
 
-    const interactiveElements = await session.page
-      .locator("a, button, input, select, textarea, [role]")
-      .evaluateAll((nodes, max) =>
-        (nodes as HTMLElement[]).slice(0, max).map((el) => {
-          const tag = el.tagName.toLowerCase();
-          const role = el.getAttribute("role");
-          const accessibleName =
-            el.getAttribute("aria-label") ||
-            (el as HTMLInputElement).placeholder ||
-            el.textContent?.trim().slice(0, 100) ||
-            null;
-          const id = el.getAttribute("id");
-          const name = el.getAttribute("name");
-          const selectorHint = id ? `#${id}` : name ? `${tag}[name="${name}"]` : tag;
-          return { tag, role, accessibleName, selectorHint };
-        }),
-      MAX_ELEMENTS,
-      );
+      const interactiveElements = await session.page
+        .locator("a, button, input, select, textarea, [role]")
+        .evaluateAll((nodes: HTMLElement[], max: number) =>
+          nodes.slice(0, max).map((el) => {
+            const tag = el.tagName.toLowerCase();
+            const role = el.getAttribute("role");
+            const accessibleName =
+              el.getAttribute("aria-label") ||
+              (el as HTMLInputElement).placeholder ||
+              el.textContent?.trim().slice(0, 100) ||
+              null;
+            const id = el.getAttribute("id");
+            const name = el.getAttribute("name");
+            const selectorHint = id ? `#${id}` : name ? `${tag}[name="${name}"]` : tag;
+            return { tag, role, accessibleName, selectorHint };
+          }),
+        MAX_ELEMENTS,
+        );
 
-    return { title, url, interactiveElements };
+      return { title, url, interactiveElements };
+    } finally {
+      await browserManager.closeTestSession(session);
+    }
   } finally {
-    await browserManager.close(session);
+    await browserManager.close();
   }
 }

@@ -23,7 +23,7 @@ export class PlaywrightAssertablePage implements AssertablePage {
     let lastText: string | null = null;
     do {
       lastText = await this.getText(selector);
-      if (lastText && lastText.includes(expected)) return lastText;
+      if (lastText !== null && lastText.includes(expected)) return lastText;
       await this.page.waitForTimeout(100);
     } while (Date.now() < deadline);
     return lastText;

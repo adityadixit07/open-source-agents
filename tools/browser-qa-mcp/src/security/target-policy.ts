@@ -52,21 +52,44 @@ export class TargetPolicy {
 }
 
 function isLoopbackOrPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host === "::1") return true;
+  // Node's URL parser returns IPv6 hostnames bracketed, e.g. "[::1]".
+  const host = stripBrackets(hostname.toLowerCase());
+  if (host === "localhost") return true;
 
-  if (isIPv4(host)) {
-    const [a, b] = host.split(".").map(Number);
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // private
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true; // private
-    if (a === 169 && b === 254) return true; // link-local, includes cloud metadata (169.254.169.254)
+  if (isIPv4(host)) return isPrivateIPv4(host.split(".").map(Number));
+
+  if (host === "::1") return true; // IPv6 loopback
+  if (host.startsWith("fe80:")) return true; // IPv6 link-local (fe80::/10)
+  if (host.startsWith("fc") || host.startsWith("fd")) return true; // IPv6 unique-local (fc00::/7)
+
+  const ipv4MappedDotted = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (ipv4MappedDotted) return isPrivateIPv4(ipv4MappedDotted[1].split(".").map(Number));
+
+  // Node normalizes an IPv4-mapped IPv6 address to compressed hex groups
+  // (e.g. "::ffff:127.0.0.1" becomes "::ffff:7f00:1"), not the dotted form above.
+  const ipv4MappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (ipv4MappedHex) {
+    const high = parseInt(ipv4MappedHex[1], 16);
+    const low = parseInt(ipv4MappedHex[2], 16);
+    return isPrivateIPv4([high >> 8, high & 0xff, low >> 8, low & 0xff]);
   }
 
   return false;
 }
 
+function isPrivateIPv4([a, b]: number[]): boolean {
+  if (a === 127) return true; // loopback
+  if (a === 10) return true; // private
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 169 && b === 254) return true; // link-local, includes cloud metadata (169.254.169.254)
+  return false;
+}
+
 function isIPv4(host: string): boolean {
   return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+function stripBrackets(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
 }

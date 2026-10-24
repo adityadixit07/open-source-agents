@@ -13,7 +13,7 @@ import { ArtifactManager } from "../evidence/artifact-manager.js";
 import { ConsoleCollector } from "../evidence/console-collector.js";
 import { NetworkCollector } from "../evidence/network-collector.js";
 import { writeReport } from "../reports/json-reporter.js";
-import { BrowserManager, type BrowserSession } from "./browser-manager.js";
+import { BrowserManager, type TestSession } from "./browser-manager.js";
 import { ActionBlockedError, executeAction } from "./action-executor.js";
 import { AssertionFailedError, executeAssertion, isAssertionAction } from "../assertions/assertion-engine.js";
 import { PlaywrightAssertablePage } from "./playwright-page-adapter.js";
@@ -44,47 +44,62 @@ export async function runTestPlan(plan: ValidatedTestPlan, options: RunPlanOptio
   let result: RunResult;
 
   if (!baseUrlVerdict.allowed) {
-    const finishedAt = new Date().toISOString();
-    result = {
-      runId,
-      planName: plan.name,
-      baseUrl: plan.baseUrl,
-      startedAt,
-      finishedAt,
-      status: "BLOCKED",
-      tests: plan.tests.map((test) => ({
-        id: test.id,
-        name: test.name,
-        status: "BLOCKED" as TestStatus,
-        steps: [],
-        error: baseUrlVerdict.reason,
-        startedAt,
-        finishedAt,
-        durationMs: 0,
-        screenshotPaths: [],
-        consoleErrors: [],
-        networkFailures: [],
-      })),
-    };
+    result = buildBlockedRun(runId, plan, startedAt, baseUrlVerdict.reason);
   } else {
     const browserManager = new BrowserManager();
-    const tests: TestResult[] = [];
-    for (const test of plan.tests) {
-      tests.push(await runSingleTest(test, plan.baseUrl, browserManager, targetPolicy, artifactManager));
+    let launched = false;
+    try {
+      await browserManager.launch();
+      launched = true;
+
+      const tests: TestResult[] = [];
+      for (const test of plan.tests) {
+        tests.push(await runSingleTest(test, plan.baseUrl, browserManager, targetPolicy, artifactManager));
+      }
+
+      const finishedAt = new Date().toISOString();
+      const status: TestStatus = tests.some((t) => t.status === "FAIL")
+        ? "FAIL"
+        : tests.some((t) => t.status === "BLOCKED")
+          ? "BLOCKED"
+          : "PASS";
+
+      result = { runId, planName: plan.name, baseUrl: plan.baseUrl, startedAt, finishedAt, status, tests };
+    } catch (err) {
+      if (launched) throw err; // a failure inside the test loop is a bug, not an environment problem - don't mask it
+      result = buildBlockedRun(runId, plan, startedAt, `Failed to launch the browser: ${(err as Error).message}`);
+    } finally {
+      await browserManager.close();
     }
-
-    const finishedAt = new Date().toISOString();
-    const status: TestStatus = tests.some((t) => t.status === "FAIL")
-      ? "FAIL"
-      : tests.some((t) => t.status === "BLOCKED")
-        ? "BLOCKED"
-        : "PASS";
-
-    result = { runId, planName: plan.name, baseUrl: plan.baseUrl, startedAt, finishedAt, status, tests };
   }
 
   writeReport(result, artifactManager.reportPath());
   return result;
+}
+
+function buildBlockedRun(runId: string, plan: ValidatedTestPlan, startedAt: string, reason: string | undefined): RunResult {
+  const finishedAt = new Date().toISOString();
+  return {
+    runId,
+    planName: plan.name,
+    baseUrl: plan.baseUrl,
+    startedAt,
+    finishedAt,
+    status: "BLOCKED",
+    tests: plan.tests.map((test) => ({
+      id: test.id,
+      name: test.name,
+      status: "BLOCKED" as TestStatus,
+      steps: [],
+      error: reason,
+      startedAt,
+      finishedAt,
+      durationMs: 0,
+      screenshotPaths: [],
+      consoleErrors: [],
+      networkFailures: [],
+    })),
+  };
 }
 
 async function runSingleTest(
@@ -100,9 +115,9 @@ async function runSingleTest(
   let status: TestStatus = "PASS";
   let error: string | undefined;
 
-  let session: BrowserSession;
+  let session: TestSession;
   try {
-    session = await browserManager.open();
+    session = await browserManager.openTestSession();
   } catch (err) {
     const finishedAt = new Date().toISOString();
     return {
@@ -110,7 +125,7 @@ async function runSingleTest(
       name: test.name,
       status: "BLOCKED",
       steps: [],
-      error: `Failed to launch an isolated browser context: ${(err as Error).message}`,
+      error: `Failed to open an isolated browser context: ${(err as Error).message}`,
       startedAt,
       finishedAt,
       durationMs: 0,
@@ -192,7 +207,7 @@ async function runSingleTest(
       await session.context.tracing.stop().catch(() => {});
     }
 
-    await browserManager.close(session);
+    await browserManager.closeTestSession(session);
   }
 
   const finishedAt = new Date().toISOString();
@@ -213,7 +228,7 @@ async function runSingleTest(
 }
 
 async function captureFailureScreenshot(
-  session: BrowserSession,
+  session: TestSession,
   artifactManager: ArtifactManager,
   testId: string,
   screenshotPaths: string[],
