@@ -34,7 +34,7 @@ const SIGNUP_HTML = `<!doctype html>
     <label>Password <input name="password" type="password" /></label>
     <button type="submit">Sign up</button>
   </form>
-  <div id="result"></div>
+  <div id="result" aria-live="polite"></div>
   <script>
     var form = document.getElementById("signup-form");
     var result = document.getElementById("result");
@@ -84,6 +84,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/signup") {
     return send(res, 200, { "Content-Type": "text/html" }, SIGNUP_HTML);
+  }
+
+  if (req.method === "GET" && url.pathname === "/favicon.ico") {
+    // Avoids a spurious 404 console error on every page load that has
+    // nothing to do with the application under test, which would otherwise
+    // show up as noise in every run's captured evidence.
+    return send(res, 204, {}, "");
   }
 
   if (req.method === "POST" && url.pathname === "/api/signup") {

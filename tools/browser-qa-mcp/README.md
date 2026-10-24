@@ -230,13 +230,13 @@ This was verified with a real MCP client/server round trip (not a mock) in `test
 
 ### Example Input
 
-`examples/signup-flow.json` runs three tests against the demo app: a valid signup, an empty required field, and an invalid email address. The demo app's email check has one deliberate bug — it only checks the value's length, not its shape — so the third test is expected to fail.
+`examples/signup-flow.json` runs four tests against the demo app, exercising all 13 supported actions/assertions across them: a valid signup, an empty required field, an invalid email address, and a page-structure check (`assert_url`, `assert_element_count`, `assert_attribute`). The demo app's email check has one deliberate bug — it only checks the value's length, not its shape — so the third test is expected to fail.
 
 ### Example Output (abridged; full JSON has one entry per step)
 
 ```json
 {
-  "runId": "3fabd356-a895-4524-b317-68a01621e6ae",
+  "runId": "4c10b7ae-9985-4501-8aa5-ff2251ea3c1a",
   "planName": "Signup flow",
   "baseUrl": "http://127.0.0.1:4000",
   "status": "FAIL",
@@ -248,13 +248,20 @@ This was verified with a real MCP client/server round trip (not a mock) in `test
       "name": "Invalid email is rejected (demonstrates a real, detected application bug)",
       "status": "FAIL",
       "error": "Expected \"[role='alert']\" to be visible within 5000ms, but it was not",
-      "screenshotPaths": ["./artifacts/3fabd356-.../signup-invalid-email-failure-....png"]
-    }
+      "screenshotPaths": ["./artifacts/4c10b7ae-.../signup-invalid-email-failure-....png"]
+    },
+    { "id": "signup-page-structure", "name": "Signup page has the expected form structure and accessibility attributes", "status": "PASS", "...": "..." }
   ]
 }
 ```
 
 This was captured from an actual run in this repository's development environment (Node 22, pre-installed Chromium) — not a hand-written mock.
+
+### Example HTML Report
+
+The same run, rendered by `--html report.html`. The failing test's embedded screenshot shows the actual seeded bug: the app displays "Welcome, Ada Lovelace!" instead of the expected validation alert.
+
+![HTML report showing 3 passed, 1 failed, 0 blocked, with the failing test's step list, error message, and embedded screenshot visible](examples/screenshots/html-report-example.png)
 
 ---
 
@@ -273,7 +280,8 @@ npm run demo:app &
 unset ANTHROPIC_API_KEY GEMINI_API_KEY LLM_PROVIDER
 npm run run:plan -- examples/signup-flow.json --allow-local-dev
 # Expect: signup-success -> PASS, signup-empty-name -> PASS, signup-invalid-email -> FAIL,
-# plus console/network evidence in the report and a trace .zip under artifacts/<runId>/ for the failing test.
+# signup-page-structure -> PASS, plus console/network evidence in the report and a trace .zip
+# under artifacts/<runId>/ for the failing test.
 ```
 
 ---

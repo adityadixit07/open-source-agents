@@ -39,6 +39,16 @@
         { "action": "click", "selector": "button[type='submit']" },
         { "action": "assert_visible", "selector": "[role='alert']" }
       ]
+    },
+    {
+      "id": "signup-page-structure",
+      "name": "Signup page has the expected form structure and accessibility attributes",
+      "steps": [
+        { "action": "navigate", "url": "/signup" },
+        { "action": "assert_url", "expected": "/signup" },
+        { "action": "assert_element_count", "selector": "#signup-form input", "expected": 3 },
+        { "action": "assert_attribute", "selector": "#result", "attribute": "aria-live", "expected": "polite" }
+      ]
     }
   ]
 }
