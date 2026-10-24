@@ -16,8 +16,10 @@ yarn-error.log*
 dist/
 build/
 
-# Test run artifacts (screenshots, traces, reports) - evidence, not source
-artifacts/
+# Test run artifacts (screenshots, traces, reports) - evidence, not source.
+# Prefix-matched: covers artifacts/ itself and the integration test's
+# isolated artifacts-mcp-test/ directory, in case a crashed run leaves it behind.
+artifacts*/
 
 # Operating system and editor files
 .DS_Store

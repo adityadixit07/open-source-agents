@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "An AI-accessible browser QA agent: executes structured test plans with Playwright, verifies outcomes with explicit assertions, and produces evidence-backed JSON reports.",
+  "license": "MIT",
+  "keywords": ["mcp", "model-context-protocol", "playwright", "browser-testing", "qa", "e2e-testing", "ai-agent"],
   "type": "module",
   "engines": {
     "node": ">=20.0.0"

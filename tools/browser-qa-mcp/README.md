@@ -29,6 +29,22 @@ A JSON→HTML report viewer, and DNS-rebinding/redirect revalidation for the tar
 
 ---
 
+## Do I Need an API Key?
+
+**No.** The entire deterministic engine — the CLI, the test-plan schema, the Playwright runner, the assertion engine, the target policy, evidence collection, and all four non-planning MCP tools (`run_qa_test`, `inspect_page`, `get_run_report`, `get_failure_evidence`) — runs with zero API keys and zero network calls to any model provider. This was verified directly: see [How to Test](#how-to-test) for the exact command that runs the full example plan with `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`LLM_PROVIDER` all explicitly unset.
+
+| Component | API key needed? | Notes |
+| :--- | :--- | :--- |
+| TypeScript / Node.js / Playwright / Chromium | No | The actual browser execution |
+| MCP SDK (`run_qa_test`, `inspect_page`, `get_run_report`, `get_failure_evidence`) | No | Reuses the same services as the CLI |
+| Console/network capture, screenshots, traces | No | Pure Playwright + local filesystem |
+| Natural-language test planning (`plan_qa_test`) | **Yes, optional** | Needs `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` |
+| Failure diagnosis hypothesis (`get_failure_evidence` with `diagnose: true`) | **Yes, optional** | Same two keys; omit the flag (or the key) and you get the factual evidence with no hypothesis attached, not an error |
+
+A key is required only if you want a natural-language request turned into a test plan for you, or a model's causal hypothesis attached to a failure. Hand-write the JSON test plan instead (see [Test Plan Format](#test-plan-format) and `examples/signup-flow.json`) and the project needs nothing beyond Node and a browser — exactly the "build the deterministic MVP first, add AI as an optional layer after" order this project was built in, not retrofitted onto.
+
+---
+
 ## Technical Stack
 
 - **Language & Runtime**: TypeScript 5 / Node.js 20+
@@ -248,9 +264,10 @@ npm run build      # TypeScript type-check / compile
 
 `npm test` runs 76 tests across 10 files: schema validation, assertion semantics, the target policy (including IPv4/IPv6 edge cases), sanitization, failure-evidence extraction, the provider-selection logic in `src/llm/client.ts`, the LLM planner/diagnosis modules (with an injected fake provider — no network calls), `RunStore`, and `tests/integration/mcp-server.test.ts`, which spins up the real demo app, launches a real Chromium via Playwright, and drives all five MCP tools through a real `Client`/`McpServer` pair. All 76 passed as of this writing (`PLAYWRIGHT_CHROMIUM_PATH` set to a pre-installed Chromium in this repo's development container).
 
-Manual end-to-end verification (also actually run, against the CLI):
+Manual end-to-end verification (also actually run, against the CLI, with `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`LLM_PROVIDER` unset to confirm the zero-API-key path — see [Do I Need an API Key?](#do-i-need-an-api-key)):
 ```bash
 npm run demo:app &
+unset ANTHROPIC_API_KEY GEMINI_API_KEY LLM_PROVIDER
 npm run run:plan -- examples/signup-flow.json --allow-local-dev
 # Expect: signup-success -> PASS, signup-empty-name -> PASS, signup-invalid-email -> FAIL,
 # plus console/network evidence in the report and a trace .zip under artifacts/<runId>/ for the failing test.
@@ -298,6 +315,7 @@ A test plan is a JSON document validated against a strict Zod schema (`src/plann
 - **Target policy checks the literal hostname/IP in the URL only.** It covers IPv4 and IPv6 loopback/private/link-local/unique-local ranges (including bracketed and IPv4-mapped IPv6 forms — see `tests/unit/target-policy.test.ts`), but it does not resolve DNS or revalidate redirect destinations, so it does not yet defend against DNS rebinding or a redirect chain that lands on a disallowed address after the initial check. Treat it as a first line of defense, not a complete network boundary.
 - **Screenshots and trace files are not themselves redacted.** Text-based evidence (console messages, captured URLs) is sanitized (see below), but a screenshot or a Playwright trace can still visually contain whatever was on screen. Don't point this at a page that renders real secrets.
 - **No HTML report viewer yet.** Reports are JSON only; render/inspect them with your own tooling for now.
+- **No retention policy for runs or artifacts.** `RunStore`'s in-memory cache and the `artifacts/<runId>/` directories on disk both grow unbounded for the lifetime of an MCP server process or a CLI-driven CI job — nothing evicts old runs or deletes old screenshots/traces. Fine for a dev loop or a bounded CI run; something a long-lived deployment would need to add.
 - **The AI planner/diagnosis prompts are not adversarially hardened.** Output is always schema-validated and the planner's `baseUrl` is pinned (see below), so a malicious plan can't execute — but a sufficiently adversarial natural-language request has not been fuzz-tested against the planner.
 - Tested on Linux (this repository's development container, Node 22) with Chromium only; Firefox/WebKit and other platforms are untested.
 - The demo app's "bug" is intentional and documented above — it exists to prove the runner detects real defects, not as an example of production-quality input validation.
